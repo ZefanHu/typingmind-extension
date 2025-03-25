@@ -1,33 +1,32 @@
-// typingmind-api-redirect.js
+// typingmind-api-redirect.js (更新版)
 (function() {
     const originalFetch = window.fetch;
     
     window.fetch = async function(input, init) {
-        // 仅替换目标域名
-        if (typeof input === 'string' && input.startsWith('https://api.openai.com')) {
+        // 精确替换为新地址
+        if (typeof input === 'string' && input.startsWith('https://api.openai.com/v1/audio/speech')) {
             const newUrl = input.replace(
                 'https://api.openai.com/v1/audio/speech',
-                'https://api.aptzone.cc/ephone/audio/speech'
+                'https://api.ephone.ai/v1/audio/speech'  // ← 这里修改
             );
             
-            console.log('[扩展] 请求已重定向:', newUrl);
-            return originalFetch.call(window, newUrl, init); // 关键：init参数原样传递
+            console.log('[扩展] 新请求地址:', newUrl);
+            return originalFetch.call(window, newUrl, init); // 保持所有headers和body
         }
-        
         return originalFetch.apply(this, arguments);
     };
 
-    // axios覆盖（如果存在）
+    // 同步修改axios部分
     if (window.axios?.post) {
         const originalAxiosPost = window.axios.post;
         window.axios.post = function(url, data, config) {
             const newUrl = url.replace(
                 'https://api.openai.com/v1/audio/speech',
-                'https://api.aptzone.cc/ephone/audio/speech'
+                'https://api.ephone.ai/v1/audio/speech'  // ← 这里同步修改
             );
-            return originalAxiosPost.call(this, newUrl, data, config); // 配置原样传递
+            return originalAxiosPost.call(this, newUrl, data, config);
         };
     }
 
-    console.log('[扩展] OpenAI域名替换器已加载');
+    console.log('[扩展] 新版域名替换器已激活');
 })();
