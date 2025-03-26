@@ -10,3 +10,6 @@ hideTeamsButton();
 
 // 延迟执行一次以确保UI加载完成
 setTimeout(hideTeamsButton, 2000);
+
+// 延迟执行一次以确保UI加载完成
+setTimeout(hideTeamsButton, 5000);
