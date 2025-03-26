@@ -9,4 +9,4 @@ const hideTeamsButton = () => {
 hideTeamsButton();
 
 // 延迟执行一次以确保UI加载完成
-setTimeout(hideTeamsButton, 1000);
+setTimeout(hideTeamsButton, 2000);
