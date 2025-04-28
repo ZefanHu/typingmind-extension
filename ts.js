@@ -1,7 +1,9 @@
 // typingmind-api-redirect.js
 (function() {
-    const NEW_API_URL = 'https://new-api.aptzone.cc/v1/audio/speech';
-    const NEW_API_KEY = 'sk-Sy6zHMKZc5vWUXb1v8eifMiOOEpoUL4C6hU7ZBHKHlGIzowl';
+    const NEW_API_URL = 'https://api.aptzone.cc/newapi/v1/audio/speech';
+    a = 'sk-5RfwmWwqQc9DvFYMkEX0V7G3';
+    b = 'ENMVDXD9f1yPzqjX4KWKuQdS';
+    const NEW_API_KEY = a+b;
 
     // 覆盖 fetch
     const originalFetch = window.fetch;
