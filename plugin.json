@@ -1,18 +1,18 @@
 {
-    "id": "gpt_image_editor_with_chevereto", // 建议修改 ID 以区分原版
+    "id": "gpt_image_editor_with_chevereto",
     "org": null,
     "code": "async function gpt_image_editor(params, userSettings, authorizedResources) {\n  const prompt = params.prompt;\n  const openaikey = userSettings.openaikey;\n  const quality = userSettings.quality || 'auto';\n  const resolution = userSettings.resolution || 'auto';\n  const background = userSettings.background || 'auto';\n  const base_url = userSettings.base_url || 'https://api.openai.com';\n  \n  if (!openaikey) {\n    throw new Error(\n      'No OpenAI key provided to the DALL-3 plugin. Please enter your OpenAI key in the plugin settings seperately and try again.',\n    );\n  }\n  \n  let resultBase64;\n  const content = authorizedResources?.lastUserMessage?.content || [];\n  let attachedImages = content\n    .filter((item) => item.type === 'tm_image_file')\n    .map((c) => ({\n      url: c.sync?.url || c.metadata?.base64,\n      name: c.metadata?.name,\n    }));\n  const lastToolCallCards =\n    authorizedResources?.lastSameToolCallResponse?.cards;\n  if (!attachedImages.length && Array.isArray(lastToolCallCards)) {\n    attachedImages = lastToolCallCards\n      .filter((c) => c.type === 'image')\n      .map((c) => ({\n        url: c.image.url,\n        name: 'output.png', // no name provided for tool output\n      }));\n  }\n  const mode = attachedImages.length ? 'edit' : 'create';\n  if (mode === 'create') {\n    const body = {\n      model: 'gpt-image-1',\n      prompt: prompt,\n      n: 1,\n      size: resolution,\n      quality: quality,\n      output_format: 'png',\n      background: background,\n    };\n    const requestOptions = {\n      method: 'POST',\n      headers: {\n        'Content-Type': 'application/json',\n        Authorization: 'Bearer ' + openaikey,\n      },\n      body: JSON.stringify(body),\n    };\n    let response = await fetch(\n      `${base_url}/v1/images/generations`,\n      requestOptions,\n    );\n    if (response.status === 401) {\n      throw new Error('Invalid API Key. Please check your settings.');\n    }\n    if (!response.ok) {\n      const errorText = await response.text();\n      throw new Error(errorText);\n    }\n    let data = await response.json();\n    resultBase64 = data.data[0].b64_json;\n  } else if (mode === 'edit') {\n    const imagesAsBlobs = await Promise.all(\n      attachedImages.map(async ({ url, name }) => {\n        if (url.startsWith('data:image/')) {\n          const blob = await fetch(url).then((res) => res.blob());\n          return { blob, name };\n        }\n        const response = await fetch(url);\n        const blob = await response.blob();\n        return { blob, name };\n      }),\n    );\n    const formData = new FormData();\n    // Model and prompt are simple\n    formData.append('model', 'gpt-image-1');\n    formData.append('prompt', prompt);\n    formData.append('n', 1);\n    formData.append('size', resolution);\n    formData.append('quality', quality);\n    formData.append('output_format', 'png');\n    formData.append('background', background);\n    // Load images (from URLs) and append as Blobs\n    for (const { blob, name } of imagesAsBlobs) {\n      formData.append('image[]', blob, name);\n    }\n    // Call the API\n    const response = await fetch(`${base_url}/v1/images/edits`, {\n      method: 'POST',\n      headers: {\n        Authorization: `Bearer ${openaikey}`,\n      },\n      body: formData,\n    });\n    if (!response.ok) {\n      const err = await response.text();\n      throw new Error(`API error: ${err}`);\n    }\n    const result = await response.json();\n    // Decode base64 and save as image (browser code varies; see below)\n    resultBase64 = result.data[0].b64_json;\n  } else {\n    throw new Error('Invalid mode. Please use \\\"create\\\" or \\\"edit\\\".');\n  }\n\n  // --- 开始修改：添加 Chevereto 上传逻辑 ---\n  let finalImageUrl = 'data:image/png;base64,' + resultBase64; // 默认是 data URL\n  let syncImage = true; // 默认让 TypingMind 同步\n\n  // 检查用户是否配置了 Chevereto\n  if (userSettings.cheveretoUrl && userSettings.cheveretoApiKey) {\n    console.log(\"检测到 Chevereto 配置，尝试上传...\"); // 调试信息\n    try {\n      const cheveretoApiUrl = userSettings.cheveretoUrl;\n      const cheveretoApiKey = userSettings.cheveretoApiKey;\n\n      // Chevereto API v1 需要 FormData\n      const formData = new FormData();\n      formData.append('key', cheveretoApiKey);\n      // 使用 'source' 参数直接传递 base64 数据\n      formData.append('source', resultBase64);\n      // 要求返回 JSON 格式，方便解析\n      formData.append('format', 'json');\n\n      const uploadResponse = await fetch(cheveretoApiUrl, {\n        method: 'POST',\n        body: formData,\n        // 通常不需要手动设置 Content-Type header for FormData\n      });\n\n      if (!uploadResponse.ok) {\n        // 上传失败，记录错误，但仍然使用默认的 data URL\n        const errorText = await uploadResponse.text();\n        console.error(`Chevereto 上传失败: ${uploadResponse.status} - ${errorText}`);\n        // 可以选择在这里抛出错误: throw new Error(`Chevereto upload failed: ${errorText}`);\n      } else {\n        // 上传成功，解析返回的 JSON\n        const result = await uploadResponse.json();\n        if (result.status_code === 200 && result.image && result.image.url) {\n          // 获取到 Chevereto 返回的图片 URL\n          finalImageUrl = result.image.url;\n          syncImage = false; // 上传成功，不需要 TypingMind 再同步了\n          console.log('成功上传到 Chevereto:', finalImageUrl);\n        } else {\n          // API 返回了成功状态码，但内容结构不对\n          console.error('Chevereto API 返回结构异常:', result);\n          // 回退到 data URL\n        }\n      }\n    } catch (uploadError) {\n      // 网络或其他异常\n      console.error('上传到 Chevereto 时发生错误:', uploadError);\n      // 回退到 data URL\n    }\n  } else {\n    console.log(\"未配置 Chevereto 或缺少 Key，使用默认 Data URL。\"); // 调试信息\n  }\n  // --- 结束修改 ---\n\n  // 使用最终确定的 URL 和同步标志返回结果\n  return {\n    cards: [\n      {\n        type: 'image',\n        image: {\n          url: finalImageUrl, // 使用处理后的 URL\n          alt: prompt.replace(/[\\\[\\\]]/g, ''), // 修正并转义正则\n          sync: syncImage, // 使用处理后的同步标志\n        },\n      },\n    ],\n  };\n}",
-    "uuid": "6b22e00a-41ec-4102-9f40-df1b24092c77", // 建议生成一个新的 UUID，避免冲突
+    "uuid": "6b22e00a-41ec-4102-9f40-df1b24092c77",
     "emoji": "🖼️",
-    "title": "GPT Image Editor (with Chevereto)", // 建议修改标题以区分
+    "title": "GPT Image Editor (with Chevereto)",
     "system": false,
-    "syncedAt": null, // 由平台自动管理
-    "createdAt": null, // 由平台自动管理
+    "syncedAt": null,
+    "createdAt": null,
     "deletedAt": null,
-    "githubURL": null, // 可以指向你的修改版本（如果公开）
+    "githubURL": null,
     "mcpDetails": null,
     "openaiSpec": {
-        "name": "gpt_image_editor_chevereto", // 建议修改 OpenAI 函数名
+        "name": "gpt_image_editor_chevereto",
         "parameters": {
             "type": "object",
             "required": [
@@ -25,7 +25,7 @@
                 }
             }
         },
-        "description": "Generate a new image or edit an existing image as requested by the user. Optionally uploads to a user-configured Chevereto instance." // 更新描述
+        "description": "Generate a new image or edit an existing image as requested by the user. Optionally uploads to a user-configured Chevereto instance."
     },
     "outputType": "cards",
     "sourceUUID": null,
@@ -33,7 +33,7 @@
     "permissions": [
         "read_last_user_message"
     ],
-    "preInstalled": false, // 通常自定义插件不是预装的
+    "preInstalled": false,
     "userSettings": [
         {
             "name": "openaikey",
@@ -74,7 +74,6 @@
             ],
             "description": "Optional, default: \"auto\""
         },
-        // --- 新增 Chevereto 设置 ---
         {
             "name": "cheveretoUrl",
             "type": "text",
@@ -91,9 +90,8 @@
             "placeholder": "你的 Chevereto API Key",
             "required": false
         }
-        // --- 结束新增设置 ---
     ],
-    "overviewMarkdown": "## GPT Image Editor (with Chevereto Upload)\n\nGenerate or edit an image with OpenAI's GPT Image model.\n\nMake sure you’ve entered your OpenAI API key in settings.\n\n**Optionally**, configure your Chevereto instance URL and API Key in the settings to upload generated images directly to your own storage, bypassing TypingMind's limit.\n\nExample usage:\n\n> Generate a picture of a cat\n\n> [Image Attachment] Add a hat to this cat", // 更新概览
+    "overviewMarkdown": "## GPT Image Editor (with Chevereto Upload)\n\nGenerate or edit an image with OpenAI's GPT Image model.\n\nMake sure you’ve entered your OpenAI API key in settings.\n\n**Optionally**, configure your Chevereto instance URL and API Key in the settings to upload generated images directly to your own storage, bypassing TypingMind's limit.\n\nExample usage:\n\n> Generate a picture of a cat\n\n> [Image Attachment] Add a hat to this cat",
     "authenticationType": "AUTH_TYPE_NONE",
     "implementationType": "javascript",
     "dynamicContextEndpoints": [],
